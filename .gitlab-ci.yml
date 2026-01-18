@@ -1,0 +1,16 @@
+variables:
+  PROJECT_NAME: poc
+  DOMAIN_NAME: terraform_module_build_image_and_push_to_ecr
+  STAGE_NAME: $CI_COMMIT_REF_SLUG
+
+include:
+  - project: 'erwan.simon/devops-platform-ci-templates'
+    ref: 'v2.0.3'
+    file:
+      - 'base.yml'
+      - 'mirror_to_github.yml'
+
+stages:
+  - init
+  - security
+  - mirror_to_github
