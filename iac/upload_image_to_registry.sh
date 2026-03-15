@@ -28,10 +28,17 @@ then
   exit 1
 fi
 
-if ! aws ecr get-login-password --region $region_name | docker login -u AWS ${account_number}.dkr.ecr.${region_name}.amazonaws.com --password-stdin;
+if ! aws ecr get-login-password --region $region_name | docker login -u AWS ${account_number}.dkr.ecr.${region_name}.amazonaws.com --password-stdin 2> login_error_message.txt;
 then
-    echo "Cannot login to ECR"
-    exit 1
+  if grep -q "The specified item already exists in the keychain." login_error_message.txt
+  then
+    # https://github.com/hashicorp/terraform-provider-helm/issues/989
+    echo "Cannot login to ECR due to bug, trying to build and push image anyway"
+  else
+    cat login_error_message.txt
+    echo "Cannot login to ECR for unmanaged reason ('$(cat login_error_message.txt)'), Exiting..."
+    exit 1;
+  fi
 fi
 
 if ! docker push ${account_number}.dkr.ecr.${region_name}.amazonaws.com/${docker_repository_name}:${image_tag};
