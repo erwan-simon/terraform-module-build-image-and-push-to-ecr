@@ -17,10 +17,10 @@ then
 fi
 
 # Get latest tag from image repository for this environment in ECR in order to maximize cache usage during docker build
-latest_image_tag=$(aws ecr describe-images --repository-name ${ecr_name} --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' | tr -d '"')
-echo "Using following image as cache => ${ecr_name}:${latest_image_tag}"
+latest_image_tag=$(aws ecr describe-images --repository-name ${docker_repository_name} --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' | tr -d '"')
+echo "Using following image as cache => ${docker_repository_name}:${latest_image_tag}"
 if ! docker buildx build -t ${account_number}.dkr.ecr.${region_name}.amazonaws.com/${docker_repository_name}:${image_tag} . \
-    --cache-from type=registry,ref=${account_number}.dkr.ecr.${region_name}.amazonaws.com/${ecr_name}:${latest_image_tag} \
+    --cache-from type=registry,ref=${account_number}.dkr.ecr.${region_name}.amazonaws.com/${docker_repository_name}:${latest_image_tag} \
     --cache-to type=inline \
     --provenance=false;
 then
@@ -30,7 +30,7 @@ fi
 
 if ! aws ecr get-login-password --region $region_name | docker login -u AWS ${account_number}.dkr.ecr.${region_name}.amazonaws.com --password-stdin 2> login_error_message.txt;
 then
-  if grep -q "The specified item already exists in the keychain." login_error_message.txt
+  if grep -q "The specified item already exists in the keychain" login_error_message.txt
   then
     # https://github.com/hashicorp/terraform-provider-helm/issues/989
     echo "Cannot login to ECR due to bug, trying to build and push image anyway"
