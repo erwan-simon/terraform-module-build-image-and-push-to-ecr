@@ -13,4 +13,18 @@ include:
 stages:
   - init
   - security
+  - test
   - mirror_to_github
+
+test_simple:
+  stage: test
+  script:
+    - cd tests/simple
+    - terraform init -input=false
+    - terraform apply -auto-approve -input=false
+  after_script:
+    - cd tests/simple
+    - terraform destroy -auto-approve -input=false
+  except:
+    refs:
+      - tags

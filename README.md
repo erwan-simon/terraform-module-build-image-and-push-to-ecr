@@ -239,6 +239,8 @@ These are typically inherited from the Terraform execution environment.
 
 ```
 .
+├── tests/
+│   └── simple/                   # End-to-end functional test stack (see section X)
 ├── iac/                          # Terraform module source code
 │   ├── data.tf                   # Data sources for AWS account and region
 │   ├── ecr.tf                    # ECR repository resource definition
@@ -317,6 +319,18 @@ The `iac/` directory contains all Terraform configuration files:
 10. **Tagging Conventions**
     - The module applies tags from `tags_map` to the ECR repository.
     - Per organizational conventions, these should include `project_name`, `domain_name`, and `stage_name` for cost allocation tracking.
+
+## X. Testing
+
+An end-to-end functional test lives in [`tests/simple/`](tests/simple). It is a Terraform stack that:
+
+1. Instantiates this module against a minimal Lambda-compatible Dockerfile under `tests/simple/app/`.
+2. Deploys the built image as a container-based AWS Lambda function.
+3. Invokes the Lambda with `aws_lambda_invocation` and asserts the response payload via an output precondition.
+
+A successful `terraform apply` validates the full build → push → run path. See [`tests/simple/README.md`](tests/simple/README.md) for prerequisites and commands. The test is run manually (requires real AWS credentials and Docker); CI integration is not in place.
+
+This stack also serves as a reference example for consumers of the module.
 
 ---
 
