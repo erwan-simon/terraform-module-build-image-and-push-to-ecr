@@ -37,6 +37,12 @@ variable "role_to_assume_arn" {
   default     = ""
 }
 
+variable "docker_build_args" {
+  type        = map(string)
+  description = "Optional map of build arguments passed to docker build as --build-arg KEY=VALUE"
+  default     = {}
+}
+
 variable "ecr_policy" {
   type        = string
   description = "The policy document for the ecr resource based policy. This is a JSON formatted string."

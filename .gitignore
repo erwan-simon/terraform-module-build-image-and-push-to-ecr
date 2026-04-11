@@ -10,3 +10,4 @@ poetry.lock
 **/dist/
 **/package_source/
 **.parquet
+CLAUDE.md

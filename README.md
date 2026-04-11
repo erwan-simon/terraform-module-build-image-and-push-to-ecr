@@ -149,6 +149,19 @@ role_to_assume_arn = "arn:aws:iam::TARGET_ACCOUNT_ID:role/ECRPushRole"
 
 The shell script will assume this role before interacting with ECR.
 
+### D. Passing Build Arguments to the Dockerfile
+
+To inject `ARG` values into the Docker build, use the `docker_build_args` variable. Each entry becomes a `--build-arg KEY=VALUE` flag on `docker buildx build`. Leave it unset (or pass `{}`) to keep the previous behavior.
+
+```hcl
+docker_build_args = {
+  APP_VERSION = "1.2.3"
+  NODE_ENV    = "production"
+}
+```
+
+Limitations: values must not contain spaces, and these arguments are visible in Terraform logs — do not use them for secrets (use Docker BuildKit `--secret` outside this module if needed).
+
 ## VI. Infrastructure
 
 ### A. Resources Created
@@ -201,6 +214,7 @@ The module is designed to be used within a Terraform configuration. Typical work
 | `image_tag_mutability` | string | `"MUTABLE"` | Whether image tags can be overwritten (MUTABLE or IMMUTABLE) |
 | `image_rebuild_trigger` | string | `""` | String value that triggers rebuild when changed. Defaults to timestamp if empty |
 | `role_to_assume_arn` | string | `""` | ARN of IAM role to assume before pushing to ECR (optional) |
+| `docker_build_args` | map(string) | `{}` | Optional map of build arguments passed to `docker buildx build` as `--build-arg KEY=VALUE`. Values must not contain spaces. Do not use for secrets (visible in Terraform logs) |
 | `ecr_policy` | string | `null` | JSON-formatted ECR resource policy (optional) |
 
 ### C. Outputs

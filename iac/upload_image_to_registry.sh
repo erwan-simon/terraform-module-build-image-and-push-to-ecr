@@ -7,6 +7,7 @@ region_name=$4
 image_tag=$5
 # if the terraform assumes a role, it should be here because this script execution does not benefit from terraform assume role
 role_to_assume_arn=$6
+docker_build_args=$7
 cd $code_path
 
 if [ ! -z "$role_to_assume_arn" ]
@@ -22,7 +23,8 @@ echo "Using following image as cache => ${docker_repository_name}:${latest_image
 if ! docker buildx build -t ${account_number}.dkr.ecr.${region_name}.amazonaws.com/${docker_repository_name}:${image_tag} . \
     --cache-from type=registry,ref=${account_number}.dkr.ecr.${region_name}.amazonaws.com/${docker_repository_name}:${latest_image_tag} \
     --cache-to type=inline \
-    --provenance=false;
+    --provenance=false \
+    ${docker_build_args};
 then
   echo "Cannot build docker image"
   exit 1
