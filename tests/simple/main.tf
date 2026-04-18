@@ -19,21 +19,15 @@ locals {
     domain_name  = "tests"
     stage_name   = "simple"
   }
-
-  image_tag = substr(md5(join("", [
-    filemd5(abspath("${path.root}/app/Dockerfile")),
-    filemd5(abspath("${path.root}/app/handler.py")),
-  ])), 0, 12)
 }
 
 module "ecr" {
   source = "../../iac"
 
-  ecr_name              = "${var.name_prefix}-simple"
-  code_path             = abspath("${path.root}/app")
-  image_tag             = local.image_tag
-  image_rebuild_trigger = local.image_tag
-  tags_map              = local.tags_map
+  ecr_name                  = "${var.name_prefix}-simple"
+  code_path                 = abspath("${path.root}/app")
+  code_hash_ignore_patterns = ["__pycache__/"]
+  tags_map                  = local.tags_map
 }
 
 data "aws_iam_policy_document" "lambda_assume_role" {
@@ -61,7 +55,7 @@ resource "aws_lambda_function" "test" {
   function_name = "${var.name_prefix}-simple"
   role          = aws_iam_role.lambda.arn
   package_type  = "Image"
-  image_uri     = "${module.ecr.ecr_url}:${local.image_tag}"
+  image_uri     = "${module.ecr.ecr_url}:${module.ecr.image_tag}"
   timeout       = 10
   tags          = local.tags_map
 

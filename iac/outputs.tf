@@ -13,3 +13,7 @@ output "ecr_arn" {
 output "code_path" {
   value = var.code_path
 }
+
+output "image_tag" {
+  value = local.image_tag
+}

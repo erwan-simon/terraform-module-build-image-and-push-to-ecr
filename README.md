@@ -131,13 +131,16 @@ Reference this module from your Terraform configuration as shown in the Installa
 
 ### B. Triggering Rebuilds
 
-By default, the image is rebuilt on every `terraform apply` due to the timestamp-based trigger. To control when rebuilds occur, set the `image_rebuild_trigger` variable to a value that changes only when you want to rebuild:
+The module computes a sha1 hash of every file under `code_path` (minus the entries matching `code_hash_ignore_patterns`). That hash is used for two things:
+
+1. As the default `image_tag` when `var.image_tag` is empty, so each code change produces a new tag (useful for services like AWS Lambda that won't repull an image under the same tag).
+2. As part of the rebuild trigger, so any source change re-runs `docker build` and pushes a new image.
+
+The final rebuild trigger is `"<code_hash>-<var.image_rebuild_trigger>"`. If `image_rebuild_trigger` is left empty, `timestamp()` is used, which forces a rebuild on every `terraform apply`. Set it to a stable value (or just rely on the code hash alone by passing an empty string — beware the `timestamp()` fallback) to avoid unnecessary rebuilds.
 
 ```hcl
-image_rebuild_trigger = filemd5("${path.root}/path/to/Dockerfile")
+code_hash_ignore_patterns = ["__pycache__/", ".mypy_cache/", "poetry.lock"]
 ```
-
-This will trigger a rebuild only when the Dockerfile content changes.
 
 ### C. Role Assumption for Cross-Account Access
 
@@ -210,9 +213,10 @@ The module is designed to be used within a Terraform configuration. Typical work
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `image_tag` | string | `"latest"` | Tag to apply to the built Docker image |
+| `image_tag` | string | `""` | Tag to apply to the built Docker image. If empty, a sha1 hash computed from the files under `code_path` is used |
 | `image_tag_mutability` | string | `"MUTABLE"` | Whether image tags can be overwritten (MUTABLE or IMMUTABLE) |
-| `image_rebuild_trigger` | string | `""` | String value that triggers rebuild when changed. Defaults to timestamp if empty |
+| `image_rebuild_trigger` | string | `""` | Extra trigger combined with the computed code hash. Any change rebuilds the image. Defaults to timestamp if empty |
+| `code_hash_ignore_patterns` | list(string) | `[]` | Path substrings to exclude when computing the code hash (e.g. `["__pycache__/", ".mypy_cache/"]`) |
 | `role_to_assume_arn` | string | `""` | ARN of IAM role to assume before pushing to ECR (optional) |
 | `docker_build_args` | map(string) | `{}` | Optional map of build arguments passed to `docker buildx build` as `--build-arg KEY=VALUE`. Values must not contain spaces. Do not use for secrets (visible in Terraform logs) |
 | `ecr_policy` | string | `null` | JSON-formatted ECR resource policy (optional) |
@@ -225,6 +229,7 @@ The module is designed to be used within a Terraform configuration. Typical work
 | `ecr_url` | The full URL of the ECR repository |
 | `ecr_arn` | The ARN of the ECR repository |
 | `code_path` | Echo of the input `code_path` variable |
+| `image_tag` | The tag actually applied to the image (either `var.image_tag` or the computed code hash) |
 
 ### D. Environment Variables
 
@@ -267,7 +272,7 @@ The `iac/` directory contains all Terraform configuration files:
 - **upload_image_to_registry.tf**: Manages the image build/push lifecycle using a null_resource
 - **upload_image_to_registry.sh**: Bash script that performs Docker build, ECR authentication, and image push
 - **data.tf**: Queries AWS account ID and region
-- **locals.tf**: Computes the rebuild trigger (timestamp if not provided)
+- **locals.tf**: Computes the code hash, resolves the effective image tag and rebuild trigger
 - **variables.tf**: Declares all input variables
 - **outputs.tf**: Exposes ECR repository information
 
@@ -296,8 +301,9 @@ The `iac/` directory contains all Terraform configuration files:
    - If the ECR repository is empty (first run), the cache-from step will fail silently, and the build proceeds without cache.
 
 5. **Rebuild Trigger Behavior**
-   - If `image_rebuild_trigger` is not set, the module uses `timestamp()`, causing a rebuild on every `terraform apply`.
-   - To avoid unnecessary rebuilds, explicitly set `image_rebuild_trigger` to a stable value (e.g., hash of Dockerfile or source code).
+   - The module always recomputes a sha1 of the files under `code_path` (filtered by `code_hash_ignore_patterns`) and folds it into the rebuild trigger.
+   - If `image_rebuild_trigger` is not set, the module additionally uses `timestamp()`, causing a rebuild on every `terraform apply` regardless of code changes. Set it to a stable value to rely only on the code-hash behavior.
+   - When `image_tag` is left empty, that same code hash is used as the tag — changing code produces a new tag automatically.
 
 6. **Role Assumption**
    - When `role_to_assume_arn` is provided, the script assumes the role using `aws sts assume-role`.

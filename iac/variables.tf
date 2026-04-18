@@ -15,8 +15,14 @@ variable "code_path" {
 
 variable "image_tag" {
   type        = string
-  description = "Tag of the image to push to the ECR"
-  default     = "latest"
+  description = "Tag of the image to push to the ECR. If empty, a hash computed from the files in code_path is used."
+  default     = ""
+}
+
+variable "code_hash_ignore_patterns" {
+  type        = list(string)
+  description = "Path patterns to exclude when computing the code hash used for the image tag and rebuild trigger"
+  default     = []
 }
 
 variable "image_tag_mutability" {
