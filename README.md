@@ -29,25 +29,25 @@ The module consists of two primary components:
 - **ECR Policy**: Optionally attaches a resource-based policy to the ECR repository for cross-account or service access control.
 
 ### B. Image Build and Upload Workflow
-- **Build Trigger**: Uses a Terraform `null_resource` with a `local-exec` provisioner to execute a shell script.
+- **Build Trigger**: Uses a `terraform_data` resource with a `local-exec` provisioner to execute a shell script. Triggered by `triggers_replace`, which folds in (a) the rebuild trigger derived from code hash + `var.image_rebuild_trigger`, (b) the effective image tag, and (c) the result of a plan-time ECR probe (`data "external" "ecr_image_presence"`) that returns `MISSING` if the expected tag is no longer in ECR. The probe makes the system self-healing after a lifecycle policy expires a referenced manifest.
 - **Docker Build**: The shell script (`upload_image_to_registry.sh`) performs the following:
   1. Navigates to the provided code path containing the Dockerfile
   2. Optionally assumes an IAM role if cross-account access is required
-  3. Retrieves the latest image tag from ECR for cache optimization
-  4. Builds the Docker image using `docker buildx` with cache-from and cache-to inline strategies
-  5. Authenticates to ECR using AWS credentials
-  6. Pushes the built image to the ECR repository with the specified tag
+  3. Authenticates to ECR using AWS credentials
+  4. Creates an ephemeral `docker-container` buildx builder (required for registry cache export)
+  5. Builds and pushes the image in a single `docker buildx build --push` step, with `--cache-from`/`--cache-to` pointing at a dedicated `:buildcache` tag (BuildKit `mode=max`)
 
 ### Component Interaction
-1. Terraform creates the ECR repository
-2. The `null_resource` executes the upload script as a local provisioner
-3. The script interacts with AWS services (ECR, STS) to build and push the image
-4. The script execution is triggered on Terraform apply and whenever the `image_rebuild_trigger` value changes
+1. Terraform creates the ECR repository and the lifecycle policy
+2. The `data "external" "ecr_image_presence"` data source probes ECR at plan-time to detect missing manifests
+3. The `terraform_data` resource executes the upload script as a local provisioner whenever its `triggers_replace` map changes
+4. The script interacts with AWS services (ECR, STS) to build and push the image
 
 ## III. Prerequisites
 
-- **Terraform**: Version compatible with AWS provider and `null_resource` provisioner (recommend Terraform >= 1.0)
-- **AWS CLI**: Installed and accessible in the PATH for ECR authentication and role assumption
+- **Terraform**: >= 1.5 (uses the `terraform_data` resource with `triggers_replace`)
+- **AWS CLI**: Installed and accessible in the PATH for ECR authentication, role assumption, and the plan-time ECR presence probe
+- **jq**: Required by `check_ecr_image_presence.sh` to parse the terraform `data "external"` query payload
 - **Docker**: Installed locally with `docker buildx` support for building and pushing images
 - **AWS Credentials**: Valid AWS credentials configured (via environment variables, AWS CLI profile, or IAM instance profile)
 - **IAM Permissions**: The executing user/role must have permissions to:
@@ -187,9 +187,15 @@ Limitations: values must not contain spaces, and these arguments are visible in 
    - Reaps untagged manifests after 1 day
    - **Coverage caveat**: rule 2 only matches tags starting with `runtime-`. Consumers who pass an explicit `var.image_tag` (e.g. `v1.2.3`) are NOT covered by this rule — their tags accumulate indefinitely. This is intentional: a consumer choosing their own tag convention is expected to manage their own rotation.
 
-4. **null_resource.ecr_upload**
+4. **terraform_data.ecr_upload**
    - Executes `upload_image_to_registry.sh` to build and push the Docker image
-   - Triggered by changes to `image_rebuild_trigger` variable
+   - `triggers_replace` combines the rebuild trigger, the image tag, and the ECR presence probe result — any change forces a rebuild
+   - Self-healing: if the lifecycle policy expires a manifest terraform still expects, the probe returns `MISSING` and the rebuild fires on the next apply
+
+5. **data.external.ecr_image_presence**
+   - Plan-time check that the expected image tag is still in ECR
+   - Returns `{"present_tag":"<tag>"}` when present, `{"present_tag":"MISSING"}` otherwise
+   - Feeds `triggers_replace` of `terraform_data.ecr_upload`
 
 ### B. Data Sources
 
@@ -276,9 +282,11 @@ These are typically inherited from the Terraform execution environment.
 The `iac/` directory contains all Terraform configuration files:
 - **ecr.tf**: Defines the ECR repository with scanning and tagging
 - **ecr_policy.tf**: Conditionally attaches an ECR repository policy
-- **upload_image_to_registry.tf**: Manages the image build/push lifecycle using a null_resource
-- **upload_image_to_registry.sh**: Bash script that performs Docker build, ECR authentication, and image push
-- **data.tf**: Queries AWS account ID and region
+- **upload_image_to_registry.tf**: Manages the image build/push lifecycle using a `terraform_data` resource with `triggers_replace`
+- **upload_image_to_registry.sh**: Bash script that performs ECR login, Docker build, and image push in a single `buildx --push` step
+- **check_ecr_image_presence.sh**: Wrapper for `data "external"` — probes ECR at plan-time for the expected image tag (self-healing trigger)
+- **data.tf**: Queries AWS account ID, region, and the ECR presence probe
+- **versions.tf**: Declares `required_providers` (aws, external)
 - **locals.tf**: Computes the code hash, resolves the effective image tag and rebuild trigger
 - **variables.tf**: Declares all input variables
 - **outputs.tf**: Exposes ECR repository information
