@@ -152,7 +152,35 @@ role_to_assume_arn = "arn:aws:iam::TARGET_ACCOUNT_ID:role/ECRPushRole"
 
 The shell script will assume this role before interacting with ECR.
 
-### D. Passing Build Arguments to the Dockerfile
+### D. Separating Dockerfile from Application Code
+
+By default the module expects the Dockerfile to live at the root of `code_path` (single-directory layout). For projects where the Dockerfile and application code are organized in separate directories, set `dockerfile_path` to the directory holding the Dockerfile and any sibling files (entrypoint scripts, ignore files, etc.).
+
+```hcl
+module "ecr_build_and_push" {
+  source = "git::https://github.com/your-org/terraform-module-build-image-and-push-to-ecr.git//iac?ref=v1.0.0"
+
+  ecr_name        = "my-application"
+  code_path       = "${path.root}/../app"
+  dockerfile_path = "${path.root}/../docker"
+  tags_map        = { ... }
+}
+```
+
+When `dockerfile_path` is set, the script assembles an isolated staging build context under `/tmp/ecr_module_build_<random>/`:
+- The contents of `dockerfile_path/` are copied to the staging root (so `Dockerfile` is at `./Dockerfile`).
+- The contents of `code_path/` are copied to `staging/payload/` and exposed via `--build-arg RELATIVE_CODE_PATH=./payload`.
+
+The Dockerfile should consume the code via the build arg:
+
+```dockerfile
+ARG RELATIVE_CODE_PATH=./payload
+COPY ${RELATIVE_CODE_PATH} /app
+```
+
+The staging directory is cleaned up on script exit (success or failure).
+
+### E. Passing Build Arguments to the Dockerfile
 
 To inject `ARG` values into the Docker build, use the `docker_build_args` variable. Each entry becomes a `--build-arg KEY=VALUE` flag on `docker buildx build`. Leave it unset (or pass `{}`) to keep the previous behavior.
 
@@ -231,6 +259,7 @@ The module is designed to be used within a Terraform configuration. Typical work
 | `image_rebuild_trigger` | string | `""` | Extra trigger combined with the computed code hash. Any change rebuilds the image. Defaults to timestamp if empty |
 | `code_hash_ignore_patterns` | list(string) | `[]` | Path substrings to exclude when computing the code hash (e.g. `["__pycache__/", ".mypy_cache/"]`) |
 | `role_to_assume_arn` | string | `""` | ARN of IAM role to assume before pushing to ECR (optional) |
+| `dockerfile_path` | string | `""` | Optional directory containing the Dockerfile when separate from `code_path`. When set, an isolated staging build context is assembled under `/tmp` with the application code under `./payload/` (see V.D) |
 | `docker_build_args` | map(string) | `{}` | Optional map of build arguments passed to `docker buildx build` as `--build-arg KEY=VALUE`. Values must not contain spaces. Do not use for secrets (visible in Terraform logs) |
 | `ecr_policy` | string | `null` | JSON-formatted ECR resource policy (optional) |
 

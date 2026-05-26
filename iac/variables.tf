@@ -10,7 +10,13 @@ variable "tags_map" {
 
 variable "code_path" {
   type        = string
-  description = "Path of the code of the lambda"
+  description = "Path of the code of the lambda. When `dockerfile_path` is empty (default), this directory MUST also contain the Dockerfile at its root — the build context is `code_path` directly. When `dockerfile_path` is set, this directory holds only the application code and is copied into `./payload/` of an isolated staging build context."
+}
+
+variable "dockerfile_path" {
+  type        = string
+  description = "Optional path of the directory containing the Dockerfile (and any files that must sit at the build context root, e.g. entrypoints). If non-empty, an isolated staging directory under /tmp is used as the build context: the contents of `dockerfile_path/` are copied to the staging root, and the contents of `code_path/` are copied into `staging/payload/` (exposed to the Dockerfile via `--build-arg RELATIVE_CODE_PATH=./payload`). Leave empty (default) to keep the legacy behavior — Dockerfile expected at the root of `code_path`."
+  default     = ""
 }
 
 variable "image_tag" {

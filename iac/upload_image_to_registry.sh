@@ -8,6 +8,10 @@ image_tag=$5
 # if the terraform assumes a role, it should be here because this script execution does not benefit from terraform assume role
 role_to_assume_arn=$6
 docker_build_args=$7
+# Optional: when non-empty, the Dockerfile and its sibling files live in a separate
+# directory from the application code. An isolated staging build context is then
+# assembled under /tmp (dockerfile_path/ → staging root, code_path/ → staging/payload/).
+dockerfile_path=$8
 
 # Dedicated tag holding the BuildKit cache manifest for this ECR repo. Separate
 # from the runtime image tag so (a) `mode=max` can export every stage (heavy
@@ -22,12 +26,28 @@ runtime_image_ref=${registry_host}/${docker_repository_name}:${image_tag}
 # buildx driver — the default `docker` driver doesn't support registry cache
 # export. Create + use a named builder, cleaned up on exit.
 builder_name="ecr_module_builder_$$_${RANDOM}"
+staging_dir=""
 cleanup() {
   docker buildx rm -f "$builder_name" >/dev/null 2>&1 || true
+  if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
+    rm -rf "$staging_dir"
+  fi
 }
 trap cleanup EXIT
 
-cd $code_path
+if [ -n "$dockerfile_path" ]; then
+  staging_dir=$(mktemp -d -t ecr_module_build_XXXXXX)
+  cp -rf "$dockerfile_path"/. "$staging_dir/" || { echo "Could not copy dockerfile context from $dockerfile_path"; exit 1; }
+  mkdir -p "$staging_dir/payload"
+  cp -rf "$code_path"/. "$staging_dir/payload/" || { echo "Could not copy code from $code_path"; exit 1; }
+  build_context="$staging_dir"
+  dockerfile_arg=(-f "$dockerfile_path/Dockerfile")
+  payload_build_arg=(--build-arg RELATIVE_CODE_PATH=./payload)
+else
+  build_context="$code_path"
+  dockerfile_arg=()
+  payload_build_arg=()
+fi
 
 if [ ! -z "$role_to_assume_arn" ]
 then
@@ -38,26 +58,32 @@ fi
 
 # ECR login must happen BEFORE buildx build --push since the registry cache
 # export and image push both need authenticated access.
-if ! aws ecr get-login-password --region $region_name | docker login -u AWS ${registry_host} --password-stdin 2> login_error_message.txt;
+login_error_file=$(mktemp -t ecr_login_error_XXXXXX.txt)
+if ! aws ecr get-login-password --region $region_name | docker login -u AWS ${registry_host} --password-stdin 2> "$login_error_file";
 then
-  if grep -q "The specified item already exists in the keychain" login_error_message.txt
+  if grep -q "The specified item already exists in the keychain" "$login_error_file"
   then
     # https://github.com/hashicorp/terraform-provider-helm/issues/989
     echo "Cannot login to ECR due to bug, trying to build and push image anyway"
   else
-    cat login_error_message.txt
-    echo "Cannot login to ECR for unmanaged reason ('$(cat login_error_message.txt)'), Exiting..."
+    cat "$login_error_file"
+    echo "Cannot login to ECR for unmanaged reason ('$(cat "$login_error_file")'), Exiting..."
+    rm -f "$login_error_file"
     exit 1;
   fi
 fi
+rm -f "$login_error_file"
 
 echo "Creating ephemeral buildx builder: $builder_name"
 docker buildx create --name "$builder_name" --driver docker-container --use
 
 echo "Using BuildKit cache => ${cache_image_ref}"
+echo "Build context => ${build_context}"
 # `--push` performs build + push in a single step. Required with the
 # docker-container driver, which doesn't load images into local docker by default.
-if ! docker buildx build -t ${runtime_image_ref} . \
+if ! docker buildx build -t ${runtime_image_ref} "$build_context" \
+    "${dockerfile_arg[@]}" \
+    "${payload_build_arg[@]}" \
     --cache-from type=registry,ref=${cache_image_ref} \
     --cache-to type=registry,ref=${cache_image_ref},mode=max,image-manifest=true,oci-mediatypes=true \
     --provenance=false \
@@ -86,5 +112,3 @@ until aws ecr describe-images \
     sleep 2
 done
 echo "Confirmed ${docker_repository_name}:${image_tag} is present in ECR"
-
-cd -
