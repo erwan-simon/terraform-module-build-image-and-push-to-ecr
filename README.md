@@ -304,8 +304,9 @@ The `iac/` directory contains all Terraform configuration files:
    - Per organizational conventions, the default region is `eu-west-1` unless explicitly configured otherwise.
 
 4. **Image Cache Strategy**
-   - The shell script attempts to use the latest image in the ECR repository as a build cache.
-   - If the ECR repository is empty (first run), the cache-from step will fail silently, and the build proceeds without cache.
+   - BuildKit registry cache with `mode=max` on a dedicated `:buildcache` tag (kept indefinitely by the ECR lifecycle policy). All build stages are exported, including heavy intermediate stages — typically much better hit rate than inline caching on multi-stage images.
+   - Requires the `docker-container` buildx driver. The script creates a named ephemeral builder per invocation and removes it on exit (trap on EXIT).
+   - If the ECR repository is empty (first run), the cache-from step fails silently and the build proceeds without cache. Subsequent builds populate the `:buildcache` tag.
 
 5. **Rebuild Trigger Behavior**
    - The module always recomputes a sha1 of the files under `code_path` (filtered by `code_hash_ignore_patterns`) and folds it into the rebuild trigger.
@@ -326,8 +327,9 @@ The `iac/` directory contains all Terraform configuration files:
    - The module does not define a backend configuration. It is expected to be used as a child module within a parent Terraform configuration that manages its own backend.
 
 9. **Docker Buildx**
-   - The script uses `docker buildx build` with inline caching and provenance disabled.
-   - Ensure Docker Buildx is installed and enabled on the execution machine.
+   - The script uses `docker buildx build --push` with registry cache `mode=max` and provenance disabled.
+   - Requires the `docker-container` buildx driver (the default `docker` driver does not support registry cache export). The script creates this builder on the fly.
+   - Ensure Docker Buildx is installed and enabled on the execution machine (Docker 19.03+).
 
 10. **Tagging Conventions**
     - The module applies tags from `tags_map` to the ECR repository.
