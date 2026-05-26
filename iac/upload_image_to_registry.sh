@@ -50,9 +50,3 @@ then
 fi
 
 cd -
-
-if [[ -z ${role_to_assume_arn} ]]
-then
-    export AWS_ACCESS_KEY_ID=$OLD_ACCESS_KEY_ID
-    export AWS_SECRET_ACCESS_ID=$OLD_SECRET_ACCESS_KEY
-fi
