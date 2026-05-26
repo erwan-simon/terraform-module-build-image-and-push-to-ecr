@@ -8,8 +8,12 @@ locals {
       !strcontains(file_path, directory_pattern_to_ignore)
     ])
   }
-  computed_code_hash    = sha1(jsonencode(local.code_file_hashes))
-  image_tag             = var.image_tag == "" ? local.computed_code_hash : var.image_tag
+  computed_code_hash = sha1(jsonencode(local.code_file_hashes))
+  # The `runtime-` prefix lets the ECR lifecycle policy (ecr.tf) target hash-derived
+  # runtime images specifically without sweeping the `:buildcache` tag. Applied only
+  # when the consumer relies on the default hash — an explicit `var.image_tag` is
+  # respected as-is to preserve consumer-side tag conventions.
+  image_tag             = var.image_tag == "" ? "runtime-${local.computed_code_hash}" : var.image_tag
   image_rebuild_trigger = "${local.computed_code_hash}-${var.image_rebuild_trigger == "" ? timestamp() : var.image_rebuild_trigger}"
   docker_build_args     = join(" ", [for k, v in var.docker_build_args : "--build-arg ${k}=${v}"])
 }

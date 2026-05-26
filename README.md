@@ -133,7 +133,7 @@ Reference this module from your Terraform configuration as shown in the Installa
 
 The module computes a sha1 hash of every file under `code_path` (minus the entries matching `code_hash_ignore_patterns`). That hash is used for two things:
 
-1. As the default `image_tag` when `var.image_tag` is empty, so each code change produces a new tag (useful for services like AWS Lambda that won't repull an image under the same tag).
+1. As the default `image_tag` when `var.image_tag` is empty, so each code change produces a new tag (useful for services like AWS Lambda that won't repull an image under the same tag). The effective tag is prefixed with `runtime-` (e.g. `runtime-3f2c8a…`) so the ECR lifecycle policy can target runtime images without touching the `:buildcache` tag. Passing an explicit `var.image_tag` keeps your value verbatim — no prefix added.
 2. As part of the rebuild trigger, so any source change re-runs `docker build` and pushes a new image.
 
 The final rebuild trigger is `"<code_hash>-<var.image_rebuild_trigger>"`. If `image_rebuild_trigger` is left empty, `timestamp()` is used, which forces a rebuild on every `terraform apply`. Set it to a stable value (or just rely on the code hash alone by passing an empty string — beware the `timestamp()` fallback) to avoid unnecessary rebuilds.
@@ -180,7 +180,14 @@ Limitations: values must not contain spaces, and these arguments are visible in 
    - Conditionally created if `var.ecr_policy` is provided
    - Applies a resource-based policy to the ECR repository
 
-3. **null_resource.ecr_upload**
+3. **aws_ecr_lifecycle_policy.main**
+   - Always created
+   - Keeps the `:buildcache` tag (BuildKit cache manifest, see Section IX.4)
+   - Keeps only the latest image whose tag starts with `runtime-` (the prefix applied automatically when `var.image_tag` is empty)
+   - Reaps untagged manifests after 1 day
+   - **Coverage caveat**: rule 2 only matches tags starting with `runtime-`. Consumers who pass an explicit `var.image_tag` (e.g. `v1.2.3`) are NOT covered by this rule — their tags accumulate indefinitely. This is intentional: a consumer choosing their own tag convention is expected to manage their own rotation.
+
+4. **null_resource.ecr_upload**
    - Executes `upload_image_to_registry.sh` to build and push the Docker image
    - Triggered by changes to `image_rebuild_trigger` variable
 
