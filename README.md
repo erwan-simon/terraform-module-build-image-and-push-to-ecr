@@ -51,11 +51,13 @@ The module consists of two primary components:
 - **Docker**: Installed locally with `docker buildx` support for building and pushing images
 - **AWS Credentials**: Valid AWS credentials configured (via environment variables, AWS CLI profile, or IAM instance profile)
 - **IAM Permissions**: The executing user/role must have permissions to:
-  - Create and manage ECR repositories
-  - Push images to ECR
+  - Create and manage ECR repositories (including `aws_ecr_lifecycle_policy`)
+  - Push images to ECR (`ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:BatchCheckLayerAvailability`)
+  - **Read images from ECR** (`ecr:DescribeImages`, `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`) — required at **plan time** by the self-healing probe (`data "external"`) **and** at apply time by the post-push visibility loop
   - Assume roles (if `role_to_assume_arn` is used)
   - Query AWS account identity and region information
-- **Source Code**: A directory containing a valid `Dockerfile` at the path specified by `code_path`
+- **Source Code**: A directory containing a valid `Dockerfile` at the path specified by `code_path` (or, when `dockerfile_path` is set, the directory containing the `Dockerfile`)
+- **Plan-time AWS reachability**: `terraform plan` now makes AWS API calls (`sts:AssumeRole` if a role is used, then `ecr:DescribeImages`) via the `data "external" "ecr_image_presence"` probe. Environments that previously ran `plan` without AWS access (read-only PR jobs, offline review) must be updated to grant these permissions or skip the probe.
 
 ## IV. Installation / Setup
 
@@ -98,6 +100,31 @@ module "ecr_build_and_push" {
       }
     ]
   })
+}
+```
+
+If you use `role_to_assume_arn`, the target role must include at minimum:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:DescribeImages",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
@@ -355,20 +382,23 @@ The `iac/` directory contains all Terraform configuration files:
    - The role must have a trust policy allowing the executing principal to assume it.
    - The script temporarily replaces AWS credentials, which may have side effects if other processes rely on the original credentials during execution.
 
-7. **GitLab as Source of Truth**
+7. **Tag mutability vs BuildKit cache**
+   - The module's BuildKit cache strategy rewrites a fixed `:buildcache` tag on every build (`--cache-to type=registry,...,mode=max`). This requires `image_tag_mutability = "MUTABLE"` (the default). Setting `IMMUTABLE` causes the second `terraform apply` to fail with `ImageTagAlreadyExistsException` when the cache push happens.
+
+8. **GitLab as Source of Truth**
    - Per organizational conventions, this repository is primarily hosted on GitLab.
    - The GitHub repository is a mirror for release management.
    - CI/CD is implemented in GitLab CI, not GitHub Actions (except for release automation).
 
-8. **Terraform Backend**
+9. **Terraform Backend**
    - The module does not define a backend configuration. It is expected to be used as a child module within a parent Terraform configuration that manages its own backend.
 
-9. **Docker Buildx**
-   - The script uses `docker buildx build --push` with registry cache `mode=max` and provenance disabled.
-   - Requires the `docker-container` buildx driver (the default `docker` driver does not support registry cache export). The script creates this builder on the fly.
-   - Ensure Docker Buildx is installed and enabled on the execution machine (Docker 19.03+).
+10. **Docker Buildx**
+    - The script uses `docker buildx build --push` with registry cache `mode=max` and provenance disabled.
+    - Requires the `docker-container` buildx driver (the default `docker` driver does not support registry cache export). The script creates this builder on the fly and targets it via `--builder`, leaving the host's default buildx context untouched.
+    - Ensure Docker Buildx is installed and enabled on the execution machine (Docker 19.03+).
 
-10. **Tagging Conventions**
+11. **Tagging Conventions**
     - The module applies tags from `tags_map` to the ECR repository.
     - Per organizational conventions, these should include `project_name`, `domain_name`, and `stage_name` for cost allocation tracking.
 

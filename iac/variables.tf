@@ -33,8 +33,13 @@ variable "code_hash_ignore_patterns" {
 
 variable "image_tag_mutability" {
   type        = string
-  description = "Is the tag of the image MUTABLE or IMMUTABLE ?"
+  description = "Is the tag of the image MUTABLE or IMMUTABLE ? Note: the module's BuildKit cache strategy rewrites a dedicated `:buildcache` tag on every build, which requires `MUTABLE`. Setting this to `IMMUTABLE` will cause the second `terraform apply` to fail with `ImageTagAlreadyExistsException` when the cache push happens."
   default     = "MUTABLE"
+
+  validation {
+    condition     = contains(["MUTABLE", "IMMUTABLE"], var.image_tag_mutability)
+    error_message = "image_tag_mutability must be MUTABLE or IMMUTABLE."
+  }
 }
 
 variable "image_rebuild_trigger" {

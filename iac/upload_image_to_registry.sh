@@ -75,13 +75,21 @@ fi
 rm -f "$login_error_file"
 
 echo "Creating ephemeral buildx builder: $builder_name"
-docker buildx create --name "$builder_name" --driver docker-container --use
+# Defensive: a previous invocation killed by SIGKILL or OOM would skip the EXIT
+# trap and leak a builder of the same name. Remove first so create is idempotent.
+docker buildx rm -f "$builder_name" >/dev/null 2>&1 || true
+if ! docker buildx create --name "$builder_name" --driver docker-container; then
+  echo "Cannot create buildx builder $builder_name — registry cache export requires the docker-container driver. Check that the docker daemon supports buildx (Docker 19.03+)."
+  exit 1
+fi
 
 echo "Using BuildKit cache => ${cache_image_ref}"
 echo "Build context => ${build_context}"
 # `--push` performs build + push in a single step. Required with the
 # docker-container driver, which doesn't load images into local docker by default.
-if ! docker buildx build -t ${runtime_image_ref} "$build_context" \
+# `--builder` targets the ephemeral builder without mutating the host's default
+# buildx selection (developers running terraform apply locally keep their context).
+if ! docker buildx build --builder "$builder_name" -t ${runtime_image_ref} "$build_context" \
     "${dockerfile_arg[@]}" \
     "${payload_build_arg[@]}" \
     --cache-from type=registry,ref=${cache_image_ref} \

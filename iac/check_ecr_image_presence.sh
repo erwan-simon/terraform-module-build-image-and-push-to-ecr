@@ -18,15 +18,18 @@ image_tag=$(echo "${query}" | jq -r .image_tag)
 region=$(echo "${query}" | jq -r .region)
 role_to_assume=$(echo "${query}" | jq -r .role_to_assume)
 
-# Mirror upload_image_to_registry.sh: assume the role if one was passed,
-# since the script runs outside terraform's provider-level assume_role.
+# Mirror upload_image_to_registry.sh: assume the role if one was passed, since
+# this script runs outside terraform's provider-level assume_role. Capture and
+# eval credentials in two steps so a failed assume-role surfaces as a real plan
+# error rather than silently exporting empty credentials and producing a spurious
+# MISSING (which would trigger a pointless rebuild that also fails downstream).
 if [ -n "${role_to_assume}" ] && [ "${role_to_assume}" != "null" ]; then
-    eval "$(aws sts assume-role \
+    sts_output=$(aws sts assume-role \
         --role-arn "${role_to_assume}" \
         --role-session-name "tf-external-ecr-check" \
         --query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" \
-        --output text \
-        | awk '{print "export AWS_ACCESS_KEY_ID=" $1 "; export AWS_SECRET_ACCESS_KEY=" $2 "; export AWS_SESSION_TOKEN=" $3}')"
+        --output text)
+    eval "$(echo "${sts_output}" | awk '{print "export AWS_ACCESS_KEY_ID=" $1 "; export AWS_SECRET_ACCESS_KEY=" $2 "; export AWS_SESSION_TOKEN=" $3}')"
 fi
 
 if aws ecr describe-images \
