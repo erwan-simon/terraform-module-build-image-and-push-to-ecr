@@ -74,7 +74,6 @@ module "ecr_build_and_push" {
   ecr_name               = "my-application"
   code_path              = "${path.root}/../app"
   image_tag              = "v1.2.3"
-  image_tag_mutability   = "IMMUTABLE"
   image_rebuild_trigger  = filemd5("${path.root}/../app/Dockerfile")
   role_to_assume_arn     = "arn:aws:iam::123456789012:role/ECRPushRole"
 
@@ -226,7 +225,7 @@ Limitations: values must not contain spaces, and these arguments are visible in 
 
 1. **aws_ecr_repository.main**
    - Name: Defined by `var.ecr_name`
-   - Image tag mutability: Configurable (MUTABLE or IMMUTABLE)
+   - Image tag mutability: hardcoded to `MUTABLE` (the module's BuildKit cache strategy rewrites a `:buildcache` tag on every build)
    - Image scanning: Enabled on push
    - Force delete: Enabled (repository can be destroyed even if it contains images)
    - Tags: Applied from `var.tags_map`
@@ -282,7 +281,6 @@ The module is designed to be used within a Terraform configuration. Typical work
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `image_tag` | string | `""` | Tag to apply to the built Docker image. If empty, a sha1 hash computed from the files under `code_path` is used |
-| `image_tag_mutability` | string | `"MUTABLE"` | Whether image tags can be overwritten (MUTABLE or IMMUTABLE) |
 | `image_rebuild_trigger` | string | `""` | Extra trigger combined with the computed code hash. Any change rebuilds the image. Defaults to timestamp if empty |
 | `code_hash_ignore_patterns` | list(string) | `[]` | Path substrings to exclude when computing the code hash (e.g. `["__pycache__/", ".mypy_cache/"]`) |
 | `role_to_assume_arn` | string | `""` | ARN of IAM role to assume before pushing to ECR (optional) |
@@ -382,23 +380,20 @@ The `iac/` directory contains all Terraform configuration files:
    - The role must have a trust policy allowing the executing principal to assume it.
    - The script temporarily replaces AWS credentials, which may have side effects if other processes rely on the original credentials during execution.
 
-7. **Tag mutability vs BuildKit cache**
-   - The module's BuildKit cache strategy rewrites a fixed `:buildcache` tag on every build (`--cache-to type=registry,...,mode=max`). This requires `image_tag_mutability = "MUTABLE"` (the default). Setting `IMMUTABLE` causes the second `terraform apply` to fail with `ImageTagAlreadyExistsException` when the cache push happens.
-
-8. **GitLab as Source of Truth**
+7. **GitLab as Source of Truth**
    - Per organizational conventions, this repository is primarily hosted on GitLab.
    - The GitHub repository is a mirror for release management.
    - CI/CD is implemented in GitLab CI, not GitHub Actions (except for release automation).
 
-9. **Terraform Backend**
+8. **Terraform Backend**
    - The module does not define a backend configuration. It is expected to be used as a child module within a parent Terraform configuration that manages its own backend.
 
-10. **Docker Buildx**
-    - The script uses `docker buildx build --push` with registry cache `mode=max` and provenance disabled.
-    - Requires the `docker-container` buildx driver (the default `docker` driver does not support registry cache export). The script creates this builder on the fly and targets it via `--builder`, leaving the host's default buildx context untouched.
-    - Ensure Docker Buildx is installed and enabled on the execution machine (Docker 19.03+).
+9. **Docker Buildx**
+   - The script uses `docker buildx build --push` with registry cache `mode=max` and provenance disabled.
+   - Requires the `docker-container` buildx driver (the default `docker` driver does not support registry cache export). The script creates this builder on the fly and targets it via `--builder`, leaving the host's default buildx context untouched.
+   - Ensure Docker Buildx is installed and enabled on the execution machine (Docker 19.03+).
 
-11. **Tagging Conventions**
+10. **Tagging Conventions**
     - The module applies tags from `tags_map` to the ECR repository.
     - Per organizational conventions, these should include `project_name`, `domain_name`, and `stage_name` for cost allocation tracking.
 

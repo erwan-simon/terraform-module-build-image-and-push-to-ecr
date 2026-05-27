@@ -1,7 +1,9 @@
 resource "aws_ecr_repository" "main" {
   name = var.ecr_name
 
-  image_tag_mutability = var.image_tag_mutability
+  # Hardcoded to MUTABLE — the BuildKit cache strategy (see upload_image_to_registry.sh)
+  # rewrites a fixed `:buildcache` tag on every build, which requires mutability.
+  image_tag_mutability = "MUTABLE"
   force_delete         = true
   image_scanning_configuration {
     scan_on_push = true
